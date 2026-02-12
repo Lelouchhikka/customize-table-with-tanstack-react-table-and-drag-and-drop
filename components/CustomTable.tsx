@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -9,6 +9,8 @@ import {
   ColumnOrderState,
   Header,
   Table,
+  RowSelectionState,
+  ColumnDef,
 } from '@tanstack/react-table';
 import {
   DndContext,
@@ -29,7 +31,18 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { DEFAULT_DATA, COLUMNS } from '../constants';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { Eye, EyeOff, GripHorizontal, GripVertical, Settings2, RotateCcw } from 'lucide-react';
+import { 
+  Eye, 
+  EyeOff, 
+  GripHorizontal, 
+  GripVertical, 
+  Settings2, 
+  RotateCcw, 
+  Trash2, 
+  Edit3, 
+  X,
+  CheckCircle2
+} from 'lucide-react';
 import { UserData } from '../types';
 
 // Draggable Header Component
@@ -53,6 +66,8 @@ const DraggableHeader: React.FC<DraggableHeaderProps> = ({ header, table }) => {
     zIndex: isDragging ? 1 : 0,
   };
 
+  const isSpecialColumn = header.column.id === 'actions';
+
   return (
     <th
       ref={setNodeRef}
@@ -62,14 +77,15 @@ const DraggableHeader: React.FC<DraggableHeaderProps> = ({ header, table }) => {
       }`}
     >
       <div className="flex items-center gap-2 p-4 h-full relative">
-        <button
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-indigo-500 p-1 -ml-1 rounded transition-colors"
-          title="Drag to reorder"
-        >
-          <GripVertical size={14} />
-        </button>
+        {!isSpecialColumn && (
+          <button
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-indigo-500 p-1 -ml-1 rounded transition-colors"
+          >
+            <GripVertical size={14} />
+          </button>
+        )}
         <div className="flex-1 truncate">
           {header.isPlaceholder
             ? null
@@ -77,57 +93,98 @@ const DraggableHeader: React.FC<DraggableHeaderProps> = ({ header, table }) => {
         </div>
       </div>
 
-      {/* Resizer Handle */}
-      <div
-        onMouseDown={header.getResizeHandler()}
-        onTouchStart={header.getResizeHandler()}
-        className={`resizer ${header.column.getIsResizing() ? 'isResizing' : ''}`}
-      />
+      {!isSpecialColumn && (
+        <div
+          onMouseDown={header.getResizeHandler()}
+          onTouchStart={header.getResizeHandler()}
+          className={`resizer ${header.column.getIsResizing() ? 'isResizing' : ''}`}
+        />
+      )}
     </th>
   );
 };
 
 export function CustomTable() {
-  const [data] = React.useState(DEFAULT_DATA);
+  const [data, setData] = useState<UserData[]>(DEFAULT_DATA);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
   // Persist column settings
-  const [columnVisibility, setColumnVisibility] = useLocalStorage<VisibilityState>(
-    'table_visibility_v1',
-    {}
-  );
-  const [columnSizing, setColumnSizing] = useLocalStorage<ColumnSizingState>(
-    'table_sizing_v1',
-    {}
-  );
+  const [columnVisibility, setColumnVisibility] = useLocalStorage<VisibilityState>('table_visibility_v1', {});
+  const [columnSizing, setColumnSizing] = useLocalStorage<ColumnSizingState>('table_sizing_v1', {});
+  
+  // Define columns: removed 'select' column as requested
+  const tableColumns = useMemo<ColumnDef<UserData, any>[]>(() => [
+    ...COLUMNS,
+    {
+      id: 'actions',
+      header: 'Actions',
+      size: 100,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            onClick={(e) => {
+              e.stopPropagation(); // Prevent row selection toggle
+              console.log('Edit', row.original);
+            }}
+            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+            title="Edit Row"
+          >
+            <Edit3 size={16} />
+          </button>
+          <button 
+            onClick={(e) => {
+              e.stopPropagation(); // Prevent row selection toggle
+              setData(prev => prev.filter(item => item.id !== row.original.id));
+            }}
+            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+            title="Delete Row"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      ),
+    }
+  ], [data]);
+
   const [columnOrder, setColumnOrder] = useLocalStorage<ColumnOrderState>(
     'table_order_v1',
-    // Fix: accessorKey is not on all members of ColumnDef union, cast to any since we know our constants use it
-    COLUMNS.map(c => (c as any).accessorKey as string)
+    tableColumns.map(c => (c.id || (c as any).accessorKey) as string)
   );
 
   const table = useReactTable({
     data,
-    columns: COLUMNS,
+    columns: tableColumns,
     state: {
       columnVisibility,
       columnSizing,
       columnOrder,
+      rowSelection,
     },
+    enableRowSelection: true,
+    onRowSelectionChange: setRowSelection,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnSizingChange: setColumnSizing,
     onColumnOrderChange: setColumnOrder,
     columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id.toString(),
   });
+
+  const selectedRowsCount = Object.keys(rowSelection).length;
+
+  const handleBulkDelete = () => {
+    const selectedIds = new Set(Object.keys(rowSelection));
+    setData(prev => prev.filter(item => !selectedIds.has(item.id.toString())));
+    setRowSelection({});
+  };
 
   const resetTable = () => {
     setColumnVisibility({});
     setColumnSizing({});
-    // Fix: accessorKey is not on all members of ColumnDef union, cast to any since we know our constants use it
-    setColumnOrder(COLUMNS.map(c => (c as any).accessorKey as string));
+    setColumnOrder(tableColumns.map(c => (c.id || (c as any).accessorKey) as string));
+    setRowSelection({});
   };
 
-  // Reordering logic for DND
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (active && over && active.id !== over.id) {
@@ -140,63 +197,84 @@ export function CustomTable() {
   };
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor)
   );
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Header Actions */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <Settings2 className="w-5 h-5 text-indigo-500" />
-            Workspace Directory
-          </h2>
-          <p className="text-sm text-slate-500">Manage team members and reorder columns by dragging handles.</p>
+      {/* Header Container */}
+      <div className="relative overflow-hidden bg-white p-6 rounded-2xl shadow-sm border border-slate-200 min-h-[100px] flex items-center">
+        {/* Default Header - Visible when nothing is selected */}
+        <div className={`flex-1 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all duration-300 transform ${selectedRowsCount > 0 ? 'opacity-0 -translate-y-8 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              <Settings2 className="w-5 h-5 text-indigo-500" />
+              Workspace Directory
+            </h2>
+            <p className="text-sm text-slate-500">Click a row to select. Drag headers to reorder.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button 
+              onClick={resetTable}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Reset Layout
+            </button>
+          </div>
         </div>
-        
-        <div className="flex flex-wrap gap-2">
-          <button 
-            onClick={resetTable}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
-          >
-            <RotateCcw className="w-4 h-4" />
-            Reset Layout
-          </button>
+
+        {/* Bulk Actions Toolbar - Visible when rows are selected */}
+        <div className={`absolute inset-0 flex items-center justify-between px-6 bg-indigo-600 text-white transition-all duration-500 transform ${selectedRowsCount > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8 pointer-events-none'}`}>
+          <div className="flex items-center gap-6">
+            <button 
+              onClick={() => setRowSelection({})}
+              className="p-1.5 hover:bg-white/20 rounded-full transition-colors flex items-center gap-2"
+              title="Clear Selection"
+            >
+              <X size={20} />
+            </button>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={18} className="text-indigo-200" />
+              <span className="font-semibold text-lg">{selectedRowsCount} items selected</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button 
+              className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold bg-white/10 hover:bg-white/20 rounded-xl transition-colors border border-white/20"
+              onClick={() => console.log('Bulk Edit', rowSelection)}
+            >
+              <Edit3 size={16} />
+              Edit
+            </button>
+            <button 
+              className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold bg-rose-500 hover:bg-rose-600 rounded-xl transition-all shadow-lg shadow-rose-900/30"
+              onClick={handleBulkDelete}
+            >
+              <Trash2 size={16} />
+              Delete Selected
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden">
         {/* Column Control Menu */}
         <div className="p-4 bg-slate-50/50 border-b border-slate-100 overflow-x-auto">
-          <div className="flex items-center gap-4 min-w-max">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="flex items-center gap-4 min-w-max text-sm">
+            <div className="flex items-center gap-2 font-semibold text-slate-500 uppercase tracking-wider">
               <Eye className="w-4 h-4" />
-              Toggle Columns:
+              Columns:
             </div>
             <div className="flex gap-2">
-              {table.getAllLeafColumns().map(column => (
+              {table.getAllLeafColumns().filter(c => c.id !== 'actions').map(column => (
                 <label 
                   key={column.id} 
-                  className={`
-                    flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm cursor-pointer transition-all select-none
-                    ${column.getIsVisible() 
-                      ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-medium' 
-                      : 'bg-white border-slate-200 text-slate-400 opacity-60'
-                    }
-                  `}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-all select-none
+                    ${column.getIsVisible() ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-medium' : 'bg-white border-slate-200 text-slate-400 opacity-60'}`}
                 >
-                  <input
-                    type="checkbox"
-                    className="hidden"
-                    checked={column.getIsVisible()}
-                    onChange={column.getToggleVisibilityHandler()}
-                  />
+                  <input type="checkbox" className="hidden" checked={column.getIsVisible()} onChange={column.getToggleVisibilityHandler()} />
                   {column.getIsVisible() ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                   <span className="capitalize">{column.id.replace(/([A-Z])/g, ' $1').trim()}</span>
                 </label>
@@ -205,24 +283,14 @@ export function CustomTable() {
           </div>
         </div>
 
-        {/* Table Container with DND context */}
-        <div className="overflow-x-auto">
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <table 
-              style={{ width: table.getCenterTotalSize() }} 
-              className="border-collapse min-w-full"
-            >
+        {/* Table Container */}
+        <div className="overflow-x-auto relative">
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <table style={{ width: table.getCenterTotalSize() }} className="border-collapse min-w-full table-fixed">
               <thead>
                 {table.getHeaderGroups().map(headerGroup => (
                   <tr key={headerGroup.id} className="bg-slate-50/80">
-                    <SortableContext
-                      items={columnOrder}
-                      strategy={horizontalListSortingStrategy}
-                    >
+                    <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
                       {headerGroup.headers.map(header => (
                         <DraggableHeader key={header.id} header={header} table={table} />
                       ))}
@@ -235,13 +303,14 @@ export function CustomTable() {
                   table.getRowModel().rows.map(row => (
                     <tr 
                       key={row.id} 
-                      className="hover:bg-indigo-50/30 transition-colors group"
+                      onClick={() => row.toggleSelected()}
+                      className={`cursor-pointer transition-colors group select-none ${row.getIsSelected() ? 'bg-indigo-50/70 hover:bg-indigo-100/70' : 'hover:bg-slate-50'}`}
                     >
                       {row.getVisibleCells().map(cell => (
                         <td 
                           key={cell.id} 
                           style={{ width: cell.column.getSize() }} 
-                          className="p-4 text-sm text-slate-600 border-r border-slate-50/50 whitespace-nowrap overflow-hidden text-ellipsis"
+                          className={`p-4 text-sm text-slate-600 border-r border-slate-50/50 whitespace-nowrap overflow-hidden text-ellipsis ${cell.column.id === 'actions' ? 'overflow-visible' : ''}`}
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
@@ -251,7 +320,7 @@ export function CustomTable() {
                 ) : (
                   <tr>
                     <td colSpan={table.getVisibleLeafColumns().length} className="p-12 text-center text-slate-400 italic">
-                      No data available.
+                      No matching records found.
                     </td>
                   </tr>
                 )}
@@ -263,16 +332,13 @@ export function CustomTable() {
         {/* Footer info */}
         <div className="p-4 border-t border-slate-100 bg-slate-50/30 flex justify-between items-center text-xs text-slate-500">
           <div>
-            Showing <span className="font-semibold text-slate-700">{table.getRowModel().rows.length}</span> team members
+            Total <span className="font-semibold text-slate-700">{data.length}</span> entries 
+            {selectedRowsCount > 0 && ` • ${selectedRowsCount} selected`}
           </div>
           <div className="flex items-center gap-4">
              <div className="flex items-center gap-1">
-               <GripVertical className="w-4 h-4 opacity-30" />
-               <span>Drag headers to reorder</span>
-             </div>
-             <div className="flex items-center gap-1">
-               <GripHorizontal className="w-4 h-4 opacity-30" />
-               <span>Resize handles on column edges</span>
+               <span className="text-slate-400">Tip:</span>
+               <span>Click any row to select</span>
              </div>
           </div>
         </div>
