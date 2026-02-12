@@ -1,0 +1,5 @@
+{
+  "name": "ProTable Dashboard",
+  "description": "A high-performance React data table powered by TanStack Table v8, featuring column resizing, visibility toggling, and persistent state using local storage.",
+  "requestFramePermissions": []
+}
